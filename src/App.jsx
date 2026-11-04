@@ -291,7 +291,7 @@ export default function App() {
                   {filteredVideos.map((video, index) => (
                     <button className={'video-card ' + (currentVideo?.url === video.url ? 'playing' : '')} key={video.name} onClick={() => setCurrentVideo(video)}>
                       <span className="video-thumb">
-                        {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span>}
+                        {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <><video src={video.url} muted preload="metadata" onLoadedData={event => event.currentTarget.classList.add('ready')} /><span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span></>}
                         <i><Play /></i>
                       </span>
                       <span className="video-card-title">{video.title}</span>
