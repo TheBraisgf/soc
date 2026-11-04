@@ -47,7 +47,10 @@ async function write(name, value) {
 export const saveMovies = value => write('movies.json', value);
 export const getHistory = () => read('history.json', []);
 export const saveHistory = value => write('history.json', value);
-export const getSession = () => read('session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], startedAt: null });
+export const getSession = async () => {
+  const session = await read('session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], drawnIds: [], watchedIds: [], startedAt: null });
+  return { ...session, rejectedIds: session.rejectedIds || [], missingIds: session.missingIds || [], drawnIds: session.drawnIds || [], watchedIds: session.watchedIds || [] };
+};
 export const saveSession = value => write('session.json', value);
 
 export async function ensureData() {
@@ -58,7 +61,7 @@ export async function ensureData() {
   for (const [name, value] of [
     ['movies.json', []],
     ['history.json', []],
-    ['session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], startedAt: null }]
+    ['session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], drawnIds: [], watchedIds: [], startedAt: null }]
   ]) {
     try { await fs.access(path.join(dataDir, name)); }
     catch { await write(name, value); }

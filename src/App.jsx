@@ -6,6 +6,14 @@ import {
 
 const API = '/api';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const shuffled = items => {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+};
 
 function useRetroAudio(enabled) {
   const context = useRef(null);
@@ -73,13 +81,15 @@ export default function App() {
   const session = data?.session;
   const available = useMemo(
     () => movies.filter(movie =>
-      movie.status !== 'watched' &&
+      !session?.watchedIds?.includes(movie.id) &&
       !session?.rejectedIds?.includes(movie.id) &&
       !session?.missingIds?.includes(movie.id)
     ),
     [movies, session]
   );
-  const watched = movies.filter(movie => movie.status === 'watched').length;
+  const watched = session?.watchedIds?.length || 0;
+  const rejectedCount = session?.rejectedIds?.length || 0;
+  const missingCount = session?.missingIds?.length || 0;
 
   const refresh = useCallback(async () => {
     const response = await fetch(API + '/movies');
@@ -96,10 +106,16 @@ export default function App() {
     window.addEventListener('focus', loadMovies);
     return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', loadMovies); };
   }, [refresh]);
+
+  useEffect(() => {
+    if (drawing || winner || !session?.selectedId) return;
+    const pendingMovie = movies.find(movie => movie.id === session.selectedId);
+    if (pendingMovie) setWinner(pendingMovie);
+  }, [drawing, winner, session?.selectedId, movies]);
   useEffect(() => {
     if (bootDone) return;
     const started = Date.now();
-    const timer = setInterval(() => setProgress(Math.min(100, (Date.now() - started) / 12000 * 100)), 50);
+    const timer = setInterval(() => setProgress(Math.min(100, (Date.now() - started) / 5000 * 100)), 50);
     const messages = window.setInterval(() => setBootMessage(value => (value + 1) % 5), 1800);
     return () => { clearInterval(timer); clearInterval(messages); };
   }, [bootDone]);
@@ -133,7 +149,6 @@ export default function App() {
   };
 
   const enter = () => {
-    if (progress < 100) return;
     audio('boot');
     setBootDone(true);
   };
@@ -158,7 +173,7 @@ export default function App() {
   }, [bootDone, progress]);
 
   const draw = async () => {
-    setNotice('Sellando el sobre dorado. Las reclamaciones van al cubo.');
+    setNotice('A ver qué toca…');
     audio('spin');
     setDrawing(true);
     setWinner(null);
@@ -166,13 +181,17 @@ export default function App() {
       const result = await post('/randomizer/draw');
       const selectedMovie = result.movie;
       const pool = available.filter(movie => movie.id !== selectedMovie.id);
-      const stopAt = pool.length * 2;
-      const tape = [...pool, ...pool, selectedMovie, ...pool, ...pool];
+      const stopAt = pool.length * 2 + Math.floor(Math.random() * Math.max(1, pool.length));
+      const tape = [];
+      while (tape.length < stopAt) tape.push(...shuffled(pool));
+      tape.length = stopAt;
+      tape.push(selectedMovie);
+      while (tape.length < stopAt + pool.length * 2 + 1) tape.push(...shuffled(pool));
       setCarouselSpin({ stopAt, movies: tape, selectedId: selectedMovie.id });
       setCarouselRun(run => run + 1);
       await sleep(4800);
       setWinner(selectedMovie);
-      setNotice('Sobre abierto. El comité de quejas está cerrado por vacaciones.');
+      setNotice(`Ha salido ${selectedMovie.title}.`);
       audio('win');
     } catch (e) {
       setNotice(e.message);
@@ -185,8 +204,8 @@ export default function App() {
     if (!winner) return;
     try {
       await post('/movies/' + winner.id + '/' + action);
-      setNotice(action === 'watched' ? 'Película archivada como vista.' :
-        action === 'reject' ? 'Rechazada hasta la próxima sesión.' : 'Marcada como no encontrada.');
+      setNotice(action === 'watched' ? 'Apuntada como vista.' :
+        action === 'reject' ? 'Vale, queda fuera por hoy.' : 'Apuntada como no encontrada.');
       setWinner(null);
       audio('click');
     } catch (e) { setNotice(e.message); }
@@ -196,7 +215,10 @@ export default function App() {
     try {
       await post('/session/reset');
       setWinner(null);
-      setNotice('Nueva sesión. La vergüenza continúa.');
+      setCurrentMovie(null);
+      setMovieError('');
+      setMovieLoading(false);
+      setNotice('Sesión reiniciada.');
       audio('boot');
     } catch (e) { setNotice(e.message); }
   };
@@ -206,7 +228,7 @@ export default function App() {
     setMovieError('');
     setMovieLoading(true);
     setCurrentMovie(winner);
-    setNotice('La sala SOC abre puertas. Que empiece la desgracia.');
+    setNotice('Reproduciendo en esta página.');
   };
 
   const handleMovieDecodeError = async () => {
@@ -223,7 +245,7 @@ export default function App() {
   };
 
   const playMovieFile = movie => { setMovieError(''); setMovieLoading(true); setCurrentMovie(movie); setWinner(movie); window.setTimeout(() => document.getElementById('movie-player')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50); };
-  const bootMessages = ['Calentando el proyector y enfriando las excusas…', 'Buscando una decisión que nadie quiera asumir…', 'Comprobando que el sofá sigue en su sitio…', 'Preparando cine de dudosa reputación…', 'SON OF A COMEDY: aquí el mando no salva a nadie.'];
+  const bootMessages = ['Buscando las películas…', 'Encendiendo el proyector…', 'Preparando el salón…', 'Un momento, que ya casi está.'];
   const carouselMovies = available.length ? [...available, ...available, ...available, ...available] : [];
   const carouselItems = carouselSpin?.movies || carouselMovies;
   const carouselStyle = { '--carousel-index': carouselSpin?.stopAt ?? 0, '--carousel-duration': '4.8s' };
@@ -243,11 +265,11 @@ export default function App() {
         <div className="boot-body">
           <div className="boot-logo">SOC<span>®</span></div>
           <h1>SON OF A COMEDY</h1>
-          <p>PORTO DO SON · CUARTEL GENERAL DE LAS MALAS DECISIONES</p>
+          <p>PORTO DO SON · CINE, VÍDEOS Y SOBREMESA</p>
           <div className="boot-track"><i style={{ width: progress + '%' }} /></div>
           <div className="boot-percent"><span>{bootMessages[bootMessage]}</span><b>{Math.floor(progress)}%</b></div>
-          <button disabled={progress < 100} onClick={enter}>ABRIR LAS PUERTAS ▶</button>
-          <small>{progress < 100 ? 'LA VERGÜENZA TARDA UNOS SEGUNDOS…' : 'PULSA ENTER Y CARGA CON LAS CONSECUENCIAS'}</small>
+          <button onClick={enter}>{progress < 100 ? 'SALTAR INTRO ▶' : 'ABRIR LAS PUERTAS ▶'}</button>
+          <small>{progress < 100 ? 'O ESPERA A QUE TERMINE EL ESPECTÁCULO…' : 'PULSA ENTER Y CARGA CON LAS CONSECUENCIAS'}</small>
         </div>
       </div>
       <div className="boot-copyright">SOC ENTERTAINMENT SYSTEM © 2026</div>
@@ -256,10 +278,10 @@ export default function App() {
 
   return (
     <main className="site">
-      <div className="utility-bar"><span>SON OF A COMEDY · PORTO DO SON</span><span>LA WEB OFICIAL DEL EVENTO (NO HAY OTRA)</span></div>
+      <div className="utility-bar"><span>SON OF A COMEDY · PORTO DO SON</span><span>PELÍCULAS PARA VER JUNTOS</span></div>
       <header className="masthead">
-        <div className="masthead-logo"><span className="logo-soc">SOC</span><div><h1>SON OF A COMEDY</h1><p>PELÍCULAS, VÍDEOS Y OTRAS MALAS DECISIONES</p></div></div>
-        <div className="masthead-date">EDICIÓN 2026<br /><b>DESDE 2026</b></div>
+        <div className="masthead-logo"><span className="logo-soc">SOC</span><div><h1>SON OF A COMEDY</h1><p>PELÍCULAS, VÍDEOS Y LO QUE SURJA</p></div></div>
+        <div className="masthead-date">EDICIÓN 2026<br /><b>PORTO DO SON</b></div>
       </header>
 
       <nav className="main-nav">
@@ -276,10 +298,10 @@ export default function App() {
 
       {tab === 'movies' ? (
         <>
-          <div className="section-title"><span>01.</span><div><h2>LA CINTA DE LA VERGÜENZA</h2><p>El azar pone la película. Vosotros ponéis las excusas. Ya sabemos cómo acaba esto.</p></div></div>
+          <div className="section-title"><span>01.</span><div><h2>¿QUÉ VEMOS?</h2><p>Elegid una de la lista o dejad que salga sola.</p></div></div>
           <section className="movie-layout">
             <article className="roulette-box">
-              <div className="box-caption"><b>EL SOBRE DORADO · CONTENIDO ALEATORIO</b><span>PUJA CON TU DIGNIDAD</span></div>
+              <div className="box-caption"><b>EL SORTEO</b><span>{available.length} {available.length === 1 ? 'PELÍCULA' : 'PELÍCULAS'} EN LA BOLSA</span></div>
               <div className={'roulette-stage ' + (drawing ? 'is-spinning' : '')}>
                 <div className="carousel-pointer">▼</div>
                 <div className="loot-window"><div key={carouselRun} className={'loot-track ' + (drawing && carouselSpin ? 'spinning' : '')} style={carouselStyle}>{carouselItems.map((movie, index) => <div className={'loot-card ' + (carouselSpin?.selectedId === movie.id && carouselSpin.stopAt === index ? 'selected' : '')} key={`${movie.id}-${index}`}><div className="loot-cover">{movie.cover ? <img src={movie.cover} alt="" /> : <div className="cover-placeholder"><Film /><small>PORTADA PENDIENTE</small></div>}</div><b>{movie.title}</b></div>)}</div></div>
@@ -287,11 +309,11 @@ export default function App() {
               </div>
               <div className="roulette-controls">
                 <button className="draw-button" disabled={drawing || !available.length} onClick={draw}>
-                  <Shuffle /> {drawing ? 'EL DESTINO ESTÁ BARAJANDO…' : '¡ABRIR SOBRE!'}
+                  <Shuffle /> {drawing ? 'A VER, A VER…' : 'SACAR PELÍCULA'}
                 </button>
                 <button className="new-session" disabled={drawing} onClick={reset}><RotateCcw /> NUEVA SESIÓN</button>
               </div>
-              <p className="roulette-disclaimer">Una película. Cero derecho a quejarse. Bueno, quejarse podéis; cambiarla, no.</p>
+              <p className="roulette-disclaimer">Si alguien tiene una propuesta mejor, que la diga ahora.</p>
             </article>
 
             <aside className="movie-sidebar">
@@ -299,17 +321,17 @@ export default function App() {
                 <div className="box-caption"><b>Y EL PREMIO ES PARA…</b><span>★★★</span></div>
                 {winner ? (
                   <div className="winner-content">
-                    <div className="winner-ribbon">PELÍCULA SELECCIONADA</div>
+                    <div className="winner-ribbon">HOY TOCA</div>
                     <h3>{winner.title}</h3>
-                    <p>La suerte ha hablado. Sed buenos perdedores.</p>
+                    <p>¿La ponemos?</p>
                     <div className="winner-actions">
                       <button className="action-play" onClick={playMovie}><Play /> VER AQUÍ</button>
-                      <button className="action-watched" onClick={() => act('watched')}><Check /> VISTA</button>
-                      <button onClick={() => act('reject')}><X /> PASAR</button>
+                      <button className="action-watched" onClick={() => act('watched')}><Check /> YA LA VIMOS</button>
+                      <button onClick={() => act('reject')}><X /> HOY NO</button>
                       <button onClick={() => act('missing')}><AlertTriangle /> NO ESTÁ</button>
                     </div>
                     {currentMovie && currentMovie.id === winner.id && <div id="movie-player" className="movie-player-inline">
-                      <div className="player-title"><b>{currentMovie.title}</b><span>SOC PLAYER · SESIÓN OFICIAL</span></div>
+                      <div className="player-title"><b>{currentMovie.title}</b><span>REPRODUCIENDO AQUÍ</span></div>
                       <div className="movie-video-frame">
                         {movieError ? <div className="movie-play-error"><b>EL PROYECTOR SE HA ATRAGANTADO</b><span>{movieError}</span><small>MKV y AVI suelen necesitar VLC; MP4 suele funcionar en el navegador.</small></div> : <video key={currentMovie.file} src={'/movie-files/' + encodeURIComponent(currentMovie.file)} controls autoPlay playsInline preload="auto" muted={false} onLoadStart={() => { setMovieLoading(true); setMovieError(''); }} onCanPlay={() => setMovieLoading(false)} onError={handleMovieDecodeError} />}
                       </div>
@@ -317,43 +339,48 @@ export default function App() {
                     </div>}
                   </div>
                 ) : (
-                  <div className="empty-winner"><div className="question-mark">?</div><b>¿QUÉ TOCARÁ?</b><p>La película elegida aparecerá aquí.</p></div>
+                  <div className="empty-winner">
+                    <div className="question-mark">{available.length ? '?' : '✓'}</div>
+                    <b>{available.length ? 'Todavía no hay película' : movies.length ? 'Por hoy, ya está' : 'No hay películas en la carpeta'}</b>
+                    <p>{available.length ? 'Sacad una y vemos qué nos toca.' : movies.length ? 'Ya han salido todas. ¿Otra ronda?' : 'Añade los archivos MP4 a la carpeta Peliculas.'}</p>
+                    {!available.length && movies.length > 0 && <button className="new-session" onClick={reset}>OTRA RONDA</button>}
+                  </div>
                 )}
               </div>
               <div className="session-box">
-                <div className="box-caption"><b>ESTADÍSTICAS DE LA SESIÓN</b><span>EN DIRECTO</span></div>
+                <div className="box-caption"><b>ESTA SESIÓN</b><span>EN DIRECTO</span></div>
                 <div className="session-numbers">
                   <div><strong>{available.length}</strong><span>DISPONIBLES</span></div>
                   <div><strong>{watched}</strong><span>VISTAS</span></div>
-                  <div><strong>{session?.rejectedIds?.length || 0}</strong><span>RECHAZADAS</span></div>
-                  <div><strong>{session?.missingIds?.length || 0}</strong><span>NO ESTÁN</span></div>
+                  <div><strong>{rejectedCount}</strong><span>HOY NO</span></div>
+                  <div><strong>{missingCount}</strong><span>NO ENCONTRADAS</span></div>
                 </div>
                 <div className="session-progress"><i style={{ width: (movies.length ? watched / movies.length * 100 : 0) + '%' }} /></div>
-                <p>{watched} de {movies.length} películas vistas en total.</p>
+                <p>{available.length ? `Quedan ${available.length} por elegir.` : 'No quedan películas disponibles.'}</p>
               </div>
             </aside>
           </section>
           <section className="movie-gallery">
-            <div className="movie-gallery-heading"><b>EL ARCHIVO DE LAS MALAS IDEAS</b><span>{movies.length} TÍTULOS · ELIGE TU PROPIA DESGRACIA</span></div>
+            <div className="movie-gallery-heading"><b>TODA LA LISTA</b><span>PULSA UNA PORTADA PARA PONER ESA PELÍCULA</span></div>
             <div className="movie-gallery-grid">{movies.map(movie => {
               const rejected = session?.rejectedIds?.includes(movie.id) || session?.missingIds?.includes(movie.id);
-              const watchedMovie = movie.status === 'watched';
+              const watchedMovie = session?.watchedIds?.includes(movie.id);
               return <button key={movie.id} className={`movie-card ${watchedMovie ? 'watched' : ''} ${rejected ? 'rejected' : ''}`} onClick={() => playMovieFile(movie)}>
                 <span className="movie-card-art">{movie.cover ? <img src={movie.cover} alt="" loading="lazy" /> : <><Film /><small>{movie.file?.split('.').pop()?.toUpperCase()}</small></>}</span>
                 <span className="movie-card-title">{movie.title}</span><span className="movie-card-file">{movie.file}</span>
-                {(watchedMovie || rejected) && <i>{watchedMovie ? 'VISTA' : 'PASADA'}</i>}
+                {(watchedMovie || rejected) && <i>{watchedMovie ? 'VISTA' : session?.missingIds?.includes(movie.id) ? 'NO ESTÁ' : 'PASADA'}</i>}
               </button>;
             })}</div>
           </section>
         </>
       ) : (
         <>
-          <div className="section-title"><span>02.</span><div><h2>EL RELLANO · VIDEOTECA</h2><p>Los grandes clásicos de internet que no deberían seguir existiendo.</p></div></div>
+          <div className="section-title"><span>02.</span><div><h2>EL RELLANO</h2><p>Para los vídeos que siempre acaban saliendo en la conversación.</p></div></div>
           <section className="rellano-page">
             <div className="rellano-heading"><b>EL RELLANO</b><span>VÍDEOS PARA PARTIRSE EL CULO DESDE 2004</span></div>
-            <div className="rellano-intro">Bienvenido a nuestra colección de vídeos. Elige uno de la lista y disfrútalo sin salir de esta página.</div>
+            <div className="rellano-intro">Los vídeos están en la carpeta compartida. Elige uno y se reproduce aquí.</div>
             {currentVideo && (
-              <div className="video-player-box">
+                <div className="video-player-box" id="rellano-player">
                 <div className="player-title"><b>{currentVideo.title}</b><span>REPRODUCIENDO EN SOC PLAYER</span></div>
                 <video key={currentVideo.url} src={currentVideo.url} controls autoPlay playsInline preload="metadata">
                   Tu navegador no puede reproducir este formato de vídeo.
@@ -362,7 +389,7 @@ export default function App() {
               </div>
             )}
             <div className="video-list-heading">
-              <div><b>VÍDEOS DISPONIBLES</b><span>{videos.length} ARCHIVOS EN LA CARPETA</span></div>
+              <div><b>VÍDEOS</b><span>{videos.length} {videos.length === 1 ? 'ARCHIVO' : 'ARCHIVOS'}</span></div>
               <label className="video-search"><Search /><input value={videoSearch} onChange={event => setVideoSearch(event.target.value)} placeholder="Buscar vídeo…" /></label>
               <button className="refresh-videos" onClick={() => setVideoRefresh(value => value + 1)}><RotateCcw /> ACTUALIZAR</button>
             </div>
@@ -371,7 +398,7 @@ export default function App() {
               filteredVideos.length ? (
                 <div className="video-grid">
                   {filteredVideos.map((video, index) => (
-                    <button className={'video-card ' + (currentVideo?.url === video.url ? 'playing' : '')} key={video.name} onClick={() => setCurrentVideo(video)}>
+                    <button className={'video-card ' + (currentVideo?.url === video.url ? 'playing' : '')} key={video.name} onClick={() => { setCurrentVideo(video); window.setTimeout(() => document.getElementById('rellano-player')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); }}>
                       <span className="video-thumb">
                         {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <><video src={video.url} muted preload="metadata" onLoadedMetadata={event => { const v = event.currentTarget; v.currentTime = Math.min(2, Math.max(0, v.duration - 0.1)); }} onSeeked={event => { const v = event.currentTarget; const c = document.createElement('canvas'); c.width = c.height = 1; const x = c.getContext('2d'); x.drawImage(v, 0, 0, 1, 1); const d = x.getImageData(0, 0, 1, 1).data; if (d[0] < 22 && d[1] < 22 && d[2] < 22 && v.currentTime + 2 < v.duration) { v.currentTime = Math.min(v.currentTime + 2, v.duration - 0.1); return; } v.classList.add('ready'); }} /><span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span></>}
                         <i><Play /></i>
@@ -391,7 +418,7 @@ export default function App() {
       )}
 
       <div className="notice" role="status">{notice}</div>
-      <footer className="site-footer"><span>SON OF A COMEDY © 2026</span><span>HECHO CON MUY POCO PRESUPUESTO Y MENOS VERGÜENZA</span><span>PORTO DO SON, GALICIA</span></footer>
+      <footer className="site-footer"><span>SON OF A COMEDY © 2026</span><span>PORTO DO SON, GALICIA</span></footer>
     </main>
   );
 }

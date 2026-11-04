@@ -22,6 +22,32 @@ const safe = id => /^[a-zA-Z0-9_-]+$/.test(id);
 const videoExtensions = new Set(['.mp4', '.webm', '.ogg', '.ogv', '.mov', '.m4v']);
 const imageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 
+function installment(title) {
+  const match = title.match(/^(.*?)(?:\s+(?:parte|part|vol(?:umen)?|episodio|episode))?\s+(\d+|i{1,3}|iv|v)$/i);
+  if (!match) return { family: title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), number: null };
+  const suffix = match[2].toLowerCase();
+  const roman = { i: 1, ii: 2, iii: 3, iv: 4, v: 5 };
+  return {
+    family: match[1].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(),
+    number: roman[suffix] || Number(suffix)
+  };
+}
+
+function chooseMovie(eligible) {
+  const parts = eligible.map(movie => ({ movie, ...installment(movie.title) }));
+  const familySizes = new Map();
+  for (const part of parts) familySizes.set(part.family, (familySizes.get(part.family) || 0) + 1);
+  const weighted = parts.map(part => ({
+    ...part,
+    weight: familySizes.get(part.family) > 1
+      ? (part.number === null || part.number === 1 ? 5 : 1)
+      : 1
+  }));
+  const total = weighted.reduce((sum, part) => sum + part.weight, 0);
+  let roll = Math.random() * total;
+  return weighted.find(part => (roll -= part.weight) < 0)?.movie || weighted.at(-1).movie;
+}
+
 app.get('/api/movies', async (_q, r, n) => {
   try {
     const [movies, history, session] = await Promise.all([getMovies(), getHistory(), getSession()]);
@@ -29,8 +55,8 @@ app.get('/api/movies', async (_q, r, n) => {
       movies, history, session,
       stats: {
         total: movies.length,
-        watched: movies.filter(m => m.status === 'watched').length,
-        pending: movies.filter(m => m.status !== 'watched').length
+        watched: session.watchedIds.length,
+        pending: movies.length - session.watchedIds.length
       }
     });
   } catch (e) { n(e); }
@@ -71,11 +97,13 @@ app.post('/api/randomizer/draw', async (_q, r, n) => {
   try {
     const movies = await getMovies();
     const s = await getSession();
-    const excluded = new Set([...s.rejectedIds, ...s.missingIds]);
-    const eligible = movies.filter(m => m.status !== 'watched' && !excluded.has(m.id));
+    const excluded = new Set([...s.rejectedIds, ...s.missingIds, ...s.drawnIds]);
+    const eligible = movies.filter(m => !s.watchedIds.includes(m.id) && !excluded.has(m.id));
     if (!eligible.length) return r.status(404).json({ error: 'No quedan películas disponibles en esta sesión.' });
-    const movie = eligible[Math.floor(Math.random() * eligible.length)];
+    if (!eligible.length) return r.status(404).json({ error: 'No quedan películas disponibles en esta sesión.' });
+    const movie = chooseMovie(eligible);
     s.selectedId = movie.id;
+    s.drawnIds.push(movie.id);
     s.startedAt ||= new Date().toISOString();
     await saveSession(s);
     r.json({ movie, remaining: eligible.length - 1 });
@@ -93,6 +121,7 @@ app.post('/api/movies/:id/:action', async (q, r, n) => {
     const h = await getHistory();
     if (action === 'watched') {
       movie.status = 'watched';
+      if (!s.watchedIds.includes(id)) s.watchedIds.push(id);
       h.push({ movieId: id, title: movie.title, action, at: new Date().toISOString(), sessionId: s.id });
       s.selectedId = null;
       await Promise.all([saveMovies(movies), saveHistory(h), saveSession(s)]);
@@ -139,8 +168,11 @@ app.post('/api/movies/:id/vlc', async (q, r, n) => {
 app.post('/api/session/reset', async (_q, r, n) => {
   try {
     const old = await getSession();
-    const session = { id: old.id + 1, selectedId: null, rejectedIds: [], missingIds: [], startedAt: new Date().toISOString() };
+    const session = { id: old.id + 1, selectedId: null, rejectedIds: [], missingIds: [], drawnIds: [], watchedIds: [], startedAt: new Date().toISOString() };
+    const movies = await getMovies();
+    const resetMovies = movies.map(movie => ({ ...movie, status: 'pending' }));
     await saveSession(session);
+    await saveMovies(resetMovies);
     r.json({ ok: true, session });
   } catch (e) { n(e); }
 });

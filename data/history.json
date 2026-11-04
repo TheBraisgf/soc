@@ -1,1 +1,72 @@
-[]
+[
+  {
+    "movieId": "m23",
+    "title": "Hermanos por pelotas",
+    "action": "watched",
+    "at": "2026-11-04T12:20:44.009Z",
+    "sessionId": 1
+  },
+  {
+    "movieId": "m39",
+    "title": "Los caballeros de la mesa cuadrada y sus locos seguidores",
+    "action": "reject",
+    "at": "2026-11-04T12:20:59.406Z",
+    "sessionId": 1
+  },
+  {
+    "movieId": "f_61757374696e20706f7765727320312e6d7034",
+    "title": "Austin Powers 1",
+    "action": "watched",
+    "at": "2026-11-04T20:00:13.525Z",
+    "sessionId": 1
+  },
+  {
+    "movieId": "f_61726d6120666174616c2e6d7034",
+    "title": "Arma Fatal",
+    "action": "reject",
+    "at": "2026-11-04T20:00:25.551Z",
+    "sessionId": 1
+  },
+  {
+    "movieId": "f_61757374696e20706f7765727320312e6d7034",
+    "title": "Austin Powers 1",
+    "action": "watched",
+    "at": "2026-11-04T22:17:51.664Z",
+    "sessionId": 11
+  },
+  {
+    "movieId": "f_6a6f686e6e7920656e676c6973682033206465206e7565766f20656e20616363696f6e2e6d7034",
+    "title": "Johnny English 3 De Nuevo En Accion",
+    "action": "watched",
+    "at": "2026-11-04T22:25:46.824Z",
+    "sessionId": 14
+  },
+  {
+    "movieId": "f_626164206772616e6470612e6d7034",
+    "title": "Bad Grandpa",
+    "action": "watched",
+    "at": "2026-11-04T22:25:54.294Z",
+    "sessionId": 14
+  },
+  {
+    "movieId": "f_616c69206720616e6461207375656c746f2e6d7034",
+    "title": "Ali G Anda Suelto",
+    "action": "watched",
+    "at": "2026-11-04T22:26:01.740Z",
+    "sessionId": 14
+  },
+  {
+    "movieId": "f_64656164706f6f6c2e6d7034",
+    "title": "Deadpool",
+    "action": "watched",
+    "at": "2026-11-04T22:26:09.675Z",
+    "sessionId": 14
+  },
+  {
+    "movieId": "f_646f7320746f6e746f73206d757920746f6e746f7320312e6d7034",
+    "title": "Dos Tontos Muy Tontos 1",
+    "action": "watched",
+    "at": "2026-11-04T22:29:00.845Z",
+    "sessionId": 17
+  }
+]
