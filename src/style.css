@@ -131,7 +131,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid #8c3027; outline-
 .video-card { display: flex; flex-direction: column; min-width: 0; padding: 6px; border: 1px solid #d4cfc3; background: #f7f5ee; color: #333; text-align: left; }
 .video-card:hover, .video-card.playing { border-color: var(--red); background: #f2eee3; }
 .video-thumb { position: relative; display: block; overflow: hidden; aspect-ratio: 4 / 3; background: #39352f; }
-.video-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.video-thumb img, .video-thumb video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.video-thumb video { display: none; position: absolute; inset: 0; }
+.video-thumb video.ready { display: block; }
+.video-thumb video.ready ~ .thumb-placeholder { display: none; }
 .thumb-placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; background: repeating-linear-gradient(135deg, #4b4640 0 10px, #403b35 10px 20px); color: #e9e2d2; }
 .thumb-placeholder svg { width: 28px; height: 28px; color: #d4c48d; }
 .thumb-placeholder b { font-size: 10px; letter-spacing: 1px; }
