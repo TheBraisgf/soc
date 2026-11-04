@@ -1,3 +1,314 @@
-import{useCallback,useEffect,useMemo,useRef,useState}from'react';import{Film,Shuffle,Check,X,AlertTriangle,RotateCcw,Volume2,VolumeX,Play,Youtube,Star}from'lucide-react';const API='/api',sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function useRetroAudio(on){const ref=useRef(null),get=()=>{const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;if(!ref.current)ref.current=new AC();if(ref.current.state==='suspended')ref.current.resume();return ref.current;},tone=(f,d,t='square',v=.05,delay=0)=>{const a=get();if(!a)return;const o=a.createOscillator(),g=a.createGain();o.type=t;o.frequency.setValueAtTime(f,a.currentTime+delay);g.gain.setValueAtTime(.0001,a.currentTime+delay);g.gain.exponentialRampToValueAtTime(v,a.currentTime+delay+.01);g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+delay+d);o.connect(g);g.connect(a.destination);o.start(a.currentTime+delay);o.stop(a.currentTime+delay+d+.02);};return useCallback(k=>{if(!on)return;get();if(k==='boot')[440,554,659,880].forEach((f,i)=>tone(f,.16,'square',.04,i*.17));if(k==='click')tone(880,.07,'square',.04);if(k==='spin')[220,330,440,550,660,770,880].forEach((f,i)=>tone(f,.1,'sawtooth',.035,i*.1));if(k==='win')[523,659,784,1046,1318].forEach((f,i)=>tone(f,.24,'square',.05,i*.16));},[on]);}
-export default function App(){const[data,setData]=useState(null),[error,setError]=useState(''),[bootDone,setBootDone]=useState(false),[progress,setProgress]=useState(0),[soundOn,setSoundOn]=useState(true),[cursor,setCursor]=useState({x:-100,y:-100}),[drawing,setDrawing]=useState(false),[winner,setWinner]=useState(null),[notice,setNotice]=useState(''),[tab,setTab]=useState('movies'),[url,setUrl]=useState(''),audio=useRetroAudio(soundOn),movies=data?.movies||[],session=data?.session,available=useMemo(()=>movies.filter(m=>m.status!=='watched'&&!session?.rejectedIds?.includes(m.id)&&!session?.missingIds?.includes(m.id)),[movies,session]),watched=movies.filter(m=>m.status==='watched').length;const refresh=useCallback(async()=>{const r=await fetch(API+'/movies');if(!r.ok)throw Error('No se pudo conectar con SOC Player API.');setData(await r.json());},[]);useEffect(()=>{refresh().catch(e=>setError(e.message));},[refresh]);useEffect(()=>{if(bootDone)return;const start=Date.now(),t=setInterval(()=>setProgress(Math.min(100,(Date.now()-start)/12000*100)),50);return()=>clearInterval(t);},[bootDone]);const post=async p=>{const r=await fetch(API+p,{method:'POST',headers:{'Content-Type':'application/json'}}),v=await r.json();if(!r.ok)throw Error(v.error||'Error');await refresh();return v;},enter=()=>{if(progress<100)return;audio('boot');setBootDone(true);};useEffect(()=>{if(bootDone||progress<100)return;const f=e=>{if(e.key==='Enter')enter();};window.addEventListener('keydown',f);return()=>window.removeEventListener('keydown',f);},[bootDone,progress]);useEffect(()=>{if(!bootDone||!window.matchMedia('(pointer:fine)').matches)return;const f=e=>setCursor({x:e.clientX,y:e.clientY});window.addEventListener('pointermove',f);return()=>window.removeEventListener('pointermove',f);},[bootDone]);const draw=async()=>{setNotice('Girando el destino cinematográfico…');audio('spin');setDrawing(true);setWinner(null);await sleep(2700);try{const v=await post('/randomizer/draw');setWinner(v.movie);setNotice('LA SUERTE ESTÁ ECHADA.');audio('win');}catch(e){setNotice(e.message);}finally{setDrawing(false);}},act=async k=>{if(!winner)return;try{await post('/movies/'+winner.id+'/'+k);setNotice(k==='watched'?'Película archivada como vista.':k==='reject'?'Rechazada hasta la próxima sesión.':'Marcada como no disponible.');setWinner(null);audio('click');}catch(e){setNotice(e.message);}},reset=async()=>{try{await post('/session/reset');setWinner(null);setNotice('Nueva sesión. La vergüenza continúa.');audio('boot');}catch(e){setNotice(e.message);}},play=async()=>{try{const v=await post('/movies/'+winner.id+'/play');setNotice(v.message);}catch(e){setNotice(e.message);}},labels=movies.filter(m=>m.status!=='watched').slice(0,12).map(m=>m.title);if(error)return <main className="error-screen"><h1>SOC PLAYER</h1><p>{error}</p><p>Arranca con <code>npm run dev</code>.</p></main>;if(!data)return <main className="boot-screen">CARGANDO SOC PLAYER...</main>;if(!bootDone)return <main className="boot-screen"><div className="boot-scanlines"/><div className="boot-window"><div className="window-title"><span>■ SOC ENTERTAINMENT SYSTEM</span><span>_ □ ×</span></div><div className="boot-content"><div className="boot-logo">SOC<span>®</span></div><h1>SON OF A COMEDY</h1><p className="boot-edition">CINEMATIC CHAOS PLAYER · PORTO DO SON · 2026</p><div className="boot-divider"/><div className="boot-status">PREPARANDO EL DESASTRE CINEMATOGRÁFICO</div><div className="boot-progress"><span style={{width:progress+'%'}}/></div><div className="boot-meta"><span>INITIALIZING SOC CORE</span><b>{Math.floor(progress)}%</b></div><div className="boot-checks"><span>FILM DATABASE</span><b>52 TITLES FOUND</b><span>COMMON SENSE</span><b className="failed">NOT FOUND</b></div><button className="boot-enter" disabled={progress<100} onClick={enter}>ENTER SOC ▶</button><p className="boot-foot">{progress<100?'PLEASE WAIT…':'PRESS ENTER OR CLICK TO CONTINUE'}</p></div></div><div className="boot-corner">SOC SYSTEMS © 2026</div></main>;return <main className="page"><div className="cursor-star" style={{left:cursor.x,top:cursor.y}} aria-hidden="true">✦</div><header className="topbar"><div className="brand"><div className="brand-mark">SOC</div><div><strong>SON OF A COMEDY</strong><small>PLAYER SYSTEM 2026</small></div></div><div className="top-actions"><span className="live"><i/> SYSTEM ONLINE</span><button className="icon-button" onClick={()=>setSoundOn(v=>!v)} title="Sonido">{soundOn?<Volume2/>:<VolumeX/>}</button></div></header><section className="hero"><div className="hero-copy"><div className="eyebrow">PORTO DO SON · ANNUAL EVENT</div><h1>THE SHOW<br/><em>MUST GO ON.</em></h1><p>Dos hermanos. 52 películas. Cero dignidad.</p><div className="hero-stats"><span><b>{movies.length}</b> PELÍCULAS</span><span><b>{watched}</b> VISTAS</span><span><b>{available.length}</b> DISPONIBLES</span></div></div><div className="hero-sticker"><Star/><b>SOC</b><small>EST. 2026</small></div></section><nav className="tabs"><button className={tab==='movies'?'active':''} onClick={()=>setTab('movies')}><Film/> PELÍCULAS</button><button className={tab==='videos'?'active':''} onClick={()=>setTab('videos')}><Youtube/> VÍDEOS</button></nav>{tab==='movies'?<section className="main-grid"><article className="panel roulette-panel"><div className="panel-heading"><span>01 / RANDOMIZER</span><span className="panel-tag">UNIFORM RANDOM</span></div><h2>¿QUÉ VEMOS AHORA?</h2><div className={'roulette '+(drawing?'spinning':'')}><div className="roulette-inner"><div className="roulette-center">SOC<span>★</span></div>{labels.map((label,i)=><span key={label} className="wheel-label" style={{transform:'rotate('+i*30+'deg) translateY(-118px) rotate(-'+i*30+'deg)'}}>{label}</span>)}</div><div className="roulette-pointer">▼</div></div>{winner?<div className="winner-card"><div className="winner-label">THE SELECTED FILM</div><h3>{winner.title}</h3><p>La suerte ha decidido. No hay apelación.</p><div className="winner-actions"><button className="primary" onClick={play}><Play/> ABRIR EN VLC</button><button className="success" onClick={()=>act('watched')}><Check/> VISTA</button><button className="quiet" onClick={()=>act('reject')}><X/> RECHAZAR</button><button className="quiet" onClick={()=>act('missing')}><AlertTriangle/> FALTA</button></div></div>:<p className="roulette-hint">{drawing?'CONSULTANDO A LOS DIOSES DEL CINE…':'PULSA EL BOTÓN Y ACEPTA TU DESTINO.'}</p>}<button className="draw-button" disabled={drawing||!available.length} onClick={draw}><Shuffle/> {drawing?'GIRANDO…':'ELEGIR PELÍCULA'}</button><button className="reset-button" onClick={reset}><RotateCcw/> NUEVA SESIÓN</button></article><aside className="panel side-panel"><div className="panel-heading"><span>02 / SESSION STATUS</span><span className="panel-tag">LIVE</span></div><h2>ESTADO DE LA SESIÓN</h2><div className="stat-row"><span>Vistas</span><b>{watched} / {movies.length}</b></div><div className="stat-row"><span>Disponibles</span><b>{available.length}</b></div><div className="stat-row"><span>Rechazadas</span><b>{session?.rejectedIds?.length||0}</b></div><div className="stat-row"><span>No encontradas</span><b>{session?.missingIds?.length||0}</b></div><div className="meter"><i style={{width:(movies.length?watched/movies.length*100:0)+'%'}}/></div><p className="side-note">El progreso queda guardado en el equipo. Las películas vistas no vuelven a entrar en el sorteo.</p><div className="side-stamp">OFFICIAL<br/>SOC EVENT</div></aside></section>:<section className="panel video-panel"><div className="panel-heading"><span>03 / INTERNET ARCHIVE</span><span className="panel-tag">VIDEO VAULT</span></div><h2>EL RELLANO DIGITAL</h2><p>Introduce un enlace de YouTube para abrirlo durante la sesión.</p><div className="youtube-row"><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..."/><button className="primary" onClick={()=>url.trim()&&window.open(url.trim(),'_blank','noopener,noreferrer')}><Play/> ABRIR VÍDEO</button></div><p className="side-note">Los enlaces se abren en una pestaña nueva.</p></section>}<div className="notice">{notice}</div><footer><span>SON OF A COMEDY © 2026</span><span>IMAGINE · CODE · CREATE · SHARE · REPEAT</span><span>MADE WITH QUESTIONABLE JUDGEMENT</span></footer></main>;}
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Film, Shuffle, Check, X, AlertTriangle, RotateCcw, Volume2, VolumeX,
+  Play, Youtube, Search, Tv, FolderOpen, ExternalLink
+} from 'lucide-react';
+
+const API = '/api';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function useRetroAudio(enabled) {
+  const context = useRef(null);
+  const playTone = useCallback((frequency, duration = 0.08, delay = 0) => {
+    if (!enabled) return;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    context.current ||= new AudioContext();
+    const audio = context.current;
+    if (audio.state === 'suspended') audio.resume();
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(frequency, audio.currentTime + delay);
+    gain.gain.setValueAtTime(0.0001, audio.currentTime + delay);
+    gain.gain.exponentialRampToValueAtTime(0.035, audio.currentTime + delay + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + delay + duration);
+    oscillator.connect(gain);
+    gain.connect(audio.destination);
+    oscillator.start(audio.currentTime + delay);
+    oscillator.stop(audio.currentTime + delay + duration + 0.02);
+  }, [enabled]);
+  return useCallback(kind => {
+    if (kind === 'spin') [240, 310, 390, 480, 590, 720, 880].forEach((f, i) => playTone(f, 0.09, i * 0.11));
+    if (kind === 'click') playTone(660, 0.06);
+    if (kind === 'win') [440, 554, 659, 880].forEach((f, i) => playTone(f, 0.18, i * 0.13));
+    if (kind === 'boot') [330, 440, 550].forEach((f, i) => playTone(f, 0.13, i * 0.12));
+  }, [playTone]);
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '0 MB';
+  return bytes > 1024 * 1024 ? (bytes / (1024 * 1024)).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' KB';
+}
+
+export default function App() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [bootDone, setBootDone] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [soundOn, setSoundOn] = useState(true);
+  const [drawing, setDrawing] = useState(false);
+  const [winner, setWinner] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [tab, setTab] = useState('movies');
+  const [videos, setVideos] = useState([]);
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [videosError, setVideosError] = useState('');
+  const [currentVideo, setCurrentVideo] = useState(null);
+  const [videoSearch, setVideoSearch] = useState('');
+  const [videoRefresh, setVideoRefresh] = useState(0);
+  const audio = useRetroAudio(soundOn);
+
+  const movies = data?.movies || [];
+  const session = data?.session;
+  const available = useMemo(
+    () => movies.filter(movie =>
+      movie.status !== 'watched' &&
+      !session?.rejectedIds?.includes(movie.id) &&
+      !session?.missingIds?.includes(movie.id)
+    ),
+    [movies, session]
+  );
+  const watched = movies.filter(movie => movie.status === 'watched').length;
+
+  const refresh = useCallback(async () => {
+    const response = await fetch(API + '/movies');
+    if (!response.ok) throw new Error('No se pudo conectar con SOC Player API.');
+    setData(await response.json());
+  }, []);
+
+  useEffect(() => { refresh().catch(e => setError(e.message)); }, [refresh]);
+  useEffect(() => {
+    if (bootDone) return;
+    const started = Date.now();
+    const timer = setInterval(() => setProgress(Math.min(100, (Date.now() - started) / 12000 * 100)), 50);
+    return () => clearInterval(timer);
+  }, [bootDone]);
+
+  useEffect(() => {
+    if (tab !== 'videos') return;
+    let active = true;
+    setVideosLoading(true);
+    setVideosError('');
+    fetch(API + '/videos')
+      .then(response => {
+        if (!response.ok) throw new Error('No se pudo leer la carpeta de vídeos.');
+        return response.json();
+      })
+      .then(result => { if (active) setVideos(result.videos || []); })
+      .catch(e => { if (active) setVideosError(e.message); })
+      .finally(() => { if (active) setVideosLoading(false); });
+    return () => { active = false; };
+  }, [tab, videoRefresh]);
+
+  const post = async endpoint => {
+    const response = await fetch(API + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Error');
+    await refresh();
+    return result;
+  };
+
+  const enter = () => {
+    if (progress < 100) return;
+    audio('boot');
+    setBootDone(true);
+  };
+
+  useEffect(() => {
+    if (bootDone || progress < 100) return;
+    const handler = event => { if (event.key === 'Enter') enter(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [bootDone, progress]);
+
+  const draw = async () => {
+    setNotice('La ruleta está decidiendo vuestro destino…');
+    audio('spin');
+    setDrawing(true);
+    setWinner(null);
+    await sleep(2800);
+    try {
+      const result = await post('/randomizer/draw');
+      setWinner(result.movie);
+      setNotice('Película seleccionada. No se admiten reclamaciones.');
+      audio('win');
+    } catch (e) {
+      setNotice(e.message);
+    } finally {
+      setDrawing(false);
+    }
+  };
+
+  const act = async action => {
+    if (!winner) return;
+    try {
+      await post('/movies/' + winner.id + '/' + action);
+      setNotice(action === 'watched' ? 'Película archivada como vista.' :
+        action === 'reject' ? 'Rechazada hasta la próxima sesión.' : 'Marcada como no encontrada.');
+      setWinner(null);
+      audio('click');
+    } catch (e) { setNotice(e.message); }
+  };
+
+  const reset = async () => {
+    try {
+      await post('/session/reset');
+      setWinner(null);
+      setNotice('Nueva sesión. La vergüenza continúa.');
+      audio('boot');
+    } catch (e) { setNotice(e.message); }
+  };
+
+  const playMovie = async () => {
+    try {
+      const result = await post('/movies/' + winner.id + '/play');
+      setNotice(result.message);
+    } catch (e) { setNotice(e.message); }
+  };
+
+  const filteredVideos = useMemo(() => {
+    const query = videoSearch.trim().toLocaleLowerCase('es');
+    return videos.filter(video => video.title.toLocaleLowerCase('es').includes(query));
+  }, [videos, videoSearch]);
+
+  if (error) return <main className="error-screen"><h1>SOC PLAYER</h1><p>{error}</p><p>Arranca el servidor con <code>npm run dev</code>.</p></main>;
+  if (!data) return <main className="boot-screen"><div className="boot-box">CARGANDO SOC PLAYER…</div></main>;
+
+  if (!bootDone) return (
+    <main className="boot-screen">
+      <div className="boot-box">
+        <div className="boot-title"><span>SON OF A COMEDY</span><span>_ □ ×</span></div>
+        <div className="boot-body">
+          <div className="boot-logo">SOC<span>®</span></div>
+          <h1>SON OF A COMEDY</h1>
+          <p>PORTO DO SON · SISTEMA DE ENTRETENIMIENTO</p>
+          <div className="boot-track"><i style={{ width: progress + '%' }} /></div>
+          <div className="boot-percent"><span>PREPARANDO EL DESASTRE</span><b>{Math.floor(progress)}%</b></div>
+          <button disabled={progress < 100} onClick={enter}>ENTRAR EN SOC ▶</button>
+          <small>{progress < 100 ? 'UN MOMENTO, POR FAVOR…' : 'PULSA ENTER PARA CONTINUAR'}</small>
+        </div>
+      </div>
+      <div className="boot-copyright">SOC ENTERTAINMENT SYSTEM © 2026</div>
+    </main>
+  );
+
+  return (
+    <main className="site">
+      <div className="utility-bar"><span>SON OF A COMEDY · PORTO DO SON</span><span>LA WEB OFICIAL DEL EVENTO (NO HAY OTRA)</span></div>
+      <header className="masthead">
+        <div className="masthead-logo"><span className="logo-soc">SOC</span><div><h1>SON OF A COMEDY</h1><p>PELÍCULAS, VÍDEOS Y OTRAS MALAS DECISIONES</p></div></div>
+        <div className="masthead-date">EDICIÓN 2026<br /><b>DESDE 2026</b></div>
+      </header>
+
+      <nav className="main-nav">
+        <button className={tab === 'movies' ? 'selected' : ''} onClick={() => setTab('movies')}><Film /> PELÍCULAS</button>
+        <button className={tab === 'videos' ? 'selected' : ''} onClick={() => setTab('videos')}><Youtube /> EL RELLANO</button>
+        <span className="nav-spacer" />
+        <button className="sound-toggle" onClick={() => setSoundOn(value => !value)}>{soundOn ? <Volume2 /> : <VolumeX />} SONIDO {soundOn ? 'ON' : 'OFF'}</button>
+      </nav>
+
+      {tab === 'movies' ? (
+        <>
+          <div className="section-title"><span>01.</span><div><h2>LA RULETA DEL DESTINO</h2><p>52 películas. Dos hermanos. Una decisión que nadie quiere tomar.</p></div></div>
+          <section className="movie-layout">
+            <article className="roulette-box">
+              <div className="box-caption"><b>SELECTOR ALEATORIO DE PELÍCULAS</b><span>NO MANIPULADO*</span></div>
+              <div className={'roulette-stage ' + (drawing ? 'is-spinning' : '')}>
+                <div className="wheel-pointer">▼</div>
+                <div className="roulette-wheel">
+                  <div className="wheel-rings" />
+                  <div className="wheel-slices" />
+                  <div className="wheel-hub"><strong>SOC</strong><small>2026</small></div>
+                </div>
+              </div>
+              <div className="roulette-controls">
+                <button className="draw-button" disabled={drawing || !available.length} onClick={draw}>
+                  <Shuffle /> {drawing ? 'GIRANDO…' : '¡ELEGIR PELÍCULA!'}
+                </button>
+                <button className="new-session" onClick={reset}><RotateCcw /> NUEVA SESIÓN</button>
+              </div>
+              <p className="roulette-disclaimer">* La organización no se hace responsable de los resultados.</p>
+            </article>
+
+            <aside className="movie-sidebar">
+              <div className="winner-box">
+                <div className="box-caption"><b>Y EL PREMIO ES PARA…</b><span>★★★</span></div>
+                {winner ? (
+                  <div className="winner-content">
+                    <div className="winner-ribbon">PELÍCULA SELECCIONADA</div>
+                    <h3>{winner.title}</h3>
+                    <p>La suerte ha hablado. Sed buenos perdedores.</p>
+                    <div className="winner-actions">
+                      <button className="action-play" onClick={playMovie}><Play /> ABRIR EN VLC</button>
+                      <button className="action-watched" onClick={() => act('watched')}><Check /> VISTA</button>
+                      <button onClick={() => act('reject')}><X /> PASAR</button>
+                      <button onClick={() => act('missing')}><AlertTriangle /> NO ESTÁ</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-winner"><div className="question-mark">?</div><b>¿QUÉ TOCARÁ?</b><p>La película elegida aparecerá aquí.</p></div>
+                )}
+              </div>
+              <div className="session-box">
+                <div className="box-caption"><b>ESTADÍSTICAS DE LA SESIÓN</b><span>EN DIRECTO</span></div>
+                <div className="session-numbers">
+                  <div><strong>{available.length}</strong><span>DISPONIBLES</span></div>
+                  <div><strong>{watched}</strong><span>VISTAS</span></div>
+                  <div><strong>{session?.rejectedIds?.length || 0}</strong><span>RECHAZADAS</span></div>
+                  <div><strong>{session?.missingIds?.length || 0}</strong><span>NO ESTÁN</span></div>
+                </div>
+                <div className="session-progress"><i style={{ width: (movies.length ? watched / movies.length * 100 : 0) + '%' }} /></div>
+                <p>{watched} de {movies.length} películas vistas en total.</p>
+              </div>
+            </aside>
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="section-title"><span>02.</span><div><h2>EL RELLANO · VIDEOTECA</h2><p>Los grandes clásicos de internet que no deberían seguir existiendo.</p></div></div>
+          <section className="rellano-page">
+            <div className="rellano-heading"><b>EL RELLANO</b><span>VÍDEOS PARA PARTIRSE EL CULO DESDE 2004</span></div>
+            <div className="rellano-intro">Bienvenido a nuestra colección de vídeos. Elige uno de la lista y disfrútalo sin salir de esta página.</div>
+            {currentVideo && (
+              <div className="video-player-box">
+                <div className="player-title"><b>{currentVideo.title}</b><span>REPRODUCIENDO EN SOC PLAYER</span></div>
+                <video key={currentVideo.url} src={currentVideo.url} controls autoPlay playsInline preload="metadata">
+                  Tu navegador no puede reproducir este formato de vídeo.
+                </video>
+                <div className="player-footer"><span>{currentVideo.name}</span><button onClick={() => setCurrentVideo(null)}>CERRAR REPRODUCTOR ×</button></div>
+              </div>
+            )}
+            <div className="video-list-heading">
+              <div><b>VÍDEOS DISPONIBLES</b><span>{videos.length} ARCHIVOS EN LA CARPETA</span></div>
+              <label className="video-search"><Search /><input value={videoSearch} onChange={event => setVideoSearch(event.target.value)} placeholder="Buscar vídeo…" /></label>
+              <button className="refresh-videos" onClick={() => setVideoRefresh(value => value + 1)}><RotateCcw /> ACTUALIZAR</button>
+            </div>
+            {videosLoading ? <p className="video-message">LEYENDO LA CARPETA DE VÍDEOS…</p> :
+              videosError ? <p className="video-message error">{videosError}</p> :
+              filteredVideos.length ? (
+                <div className="video-grid">
+                  {filteredVideos.map((video, index) => (
+                    <button className={'video-card ' + (currentVideo?.url === video.url ? 'playing' : '')} key={video.name} onClick={() => setCurrentVideo(video)}>
+                      <span className="video-thumb">
+                        {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span>}
+                        <i><Play /></i>
+                      </span>
+                      <span className="video-card-title">{video.title}</span>
+                      <span className="video-card-meta">ARCHIVO LOCAL · {formatSize(video.size)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-videos"><FolderOpen /><b>NO HAY VÍDEOS TODAVÍA</b><p>Copia tus vídeos a la carpeta <code>videos</code> del proyecto y pulsa «Actualizar».</p><small>Formatos compatibles: MP4, WebM, OGG, OGV y MOV (según navegador).</small></div>
+              )}
+            <div className="rellano-bottom">EL RELLANO SOC · ARCHIVO LOCAL · PROHIBIDO PONER TEMAS DE BUEN GUSTO</div>
+          </section>
+        </>
+      )}
+
+      <div className="notice" role="status">{notice}</div>
+      <footer className="site-footer"><span>SON OF A COMEDY © 2026</span><span>HECHO CON MUY POCO PRESUPUESTO Y MENOS VERGÜENZA</span><span>PORTO DO SON, GALICIA</span></footer>
+    </main>
+  );
+}
