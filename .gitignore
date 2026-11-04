@@ -6,3 +6,6 @@ videos/*
 !videos/.gitkeep
 media/movies/*
 !media/movies/.gitkeep
+
+public/covers/*
+!public/covers/.gitkeep

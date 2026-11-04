@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Film, Shuffle, Check, X, AlertTriangle, RotateCcw, Volume2, VolumeX,
-  Play, Youtube, Search, Tv, FolderOpen, ExternalLink
+  Play, Youtube, Search, Tv, FolderOpen, Music2
 } from 'lucide-react';
 
 const API = '/api';
@@ -55,8 +55,18 @@ export default function App() {
   const [videosLoading, setVideosLoading] = useState(false);
   const [videosError, setVideosError] = useState('');
   const [currentVideo, setCurrentVideo] = useState(null);
+  const [currentMovie, setCurrentMovie] = useState(null);
+  const [movieLoading, setMovieLoading] = useState(false);
+  const [movieError, setMovieError] = useState('');
   const [videoSearch, setVideoSearch] = useState('');
   const [videoRefresh, setVideoRefresh] = useState(0);
+  const [bootMessage, setBootMessage] = useState(0);
+  const [carouselSpin, setCarouselSpin] = useState(null);
+  const [carouselRun, setCarouselRun] = useState(0);
+  const [anthemPlaying, setAnthemPlaying] = useState(false);
+  const [anthemVolume, setAnthemVolume] = useState(0.35);
+  const anthemRef = useRef(null);
+  const hasLoadedRef = useRef(false);
   const audio = useRetroAudio(soundOn);
 
   const movies = data?.movies || [];
@@ -75,14 +85,23 @@ export default function App() {
     const response = await fetch(API + '/movies');
     if (!response.ok) throw new Error('No se pudo conectar con SOC Player API.');
     setData(await response.json());
+    hasLoadedRef.current = true;
   }, []);
 
-  useEffect(() => { refresh().catch(e => setError(e.message)); }, [refresh]);
+  useEffect(() => {
+    let active = true;
+    const loadMovies = () => refresh().catch(e => { if (active && !hasLoadedRef.current) setError(e.message); });
+    loadMovies();
+    const timer = window.setInterval(loadMovies, 15000);
+    window.addEventListener('focus', loadMovies);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', loadMovies); };
+  }, [refresh]);
   useEffect(() => {
     if (bootDone) return;
     const started = Date.now();
     const timer = setInterval(() => setProgress(Math.min(100, (Date.now() - started) / 12000 * 100)), 50);
-    return () => clearInterval(timer);
+    const messages = window.setInterval(() => setBootMessage(value => (value + 1) % 5), 1800);
+    return () => { clearInterval(timer); clearInterval(messages); };
   }, [bootDone]);
 
   useEffect(() => {
@@ -90,7 +109,7 @@ export default function App() {
     let active = true;
     setVideosLoading(true);
     setVideosError('');
-    fetch(API + '/videos')
+    const loadVideos = () => fetch(API + '/videos')
       .then(response => {
         if (!response.ok) throw new Error('No se pudo leer la carpeta de vídeos.');
         return response.json();
@@ -98,7 +117,11 @@ export default function App() {
       .then(result => { if (active) setVideos(result.videos || []); })
       .catch(e => { if (active) setVideosError(e.message); })
       .finally(() => { if (active) setVideosLoading(false); });
-    return () => { active = false; };
+    loadVideos();
+    const timer = window.setInterval(loadVideos, 30000);
+    const onFocus = () => loadVideos();
+    window.addEventListener('focus', onFocus);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('focus', onFocus); };
   }, [tab, videoRefresh]);
 
   const post = async endpoint => {
@@ -115,6 +138,18 @@ export default function App() {
     setBootDone(true);
   };
 
+  const toggleAnthem = async () => {
+    const player = anthemRef.current;
+    if (!player) return;
+    if (player.paused) {
+      try { player.volume = anthemVolume; await player.play(); setAnthemPlaying(true); }
+      catch { setNotice('No se pudo reproducir SOC2.mp3. Comprueba que el archivo esté en Canciones/.'); }
+    } else {
+      player.pause();
+      setAnthemPlaying(false);
+    }
+  };
+
   useEffect(() => {
     if (bootDone || progress < 100) return;
     const handler = event => { if (event.key === 'Enter') enter(); };
@@ -123,15 +158,21 @@ export default function App() {
   }, [bootDone, progress]);
 
   const draw = async () => {
-    setNotice('La ruleta está decidiendo vuestro destino…');
+    setNotice('Sellando el sobre dorado. Las reclamaciones van al cubo.');
     audio('spin');
     setDrawing(true);
     setWinner(null);
-    await sleep(2800);
     try {
       const result = await post('/randomizer/draw');
-      setWinner(result.movie);
-      setNotice('Película seleccionada. No se admiten reclamaciones.');
+      const selectedMovie = result.movie;
+      const pool = available.filter(movie => movie.id !== selectedMovie.id);
+      const stopAt = pool.length * 2;
+      const tape = [...pool, ...pool, selectedMovie, ...pool, ...pool];
+      setCarouselSpin({ stopAt, movies: tape, selectedId: selectedMovie.id });
+      setCarouselRun(run => run + 1);
+      await sleep(4800);
+      setWinner(selectedMovie);
+      setNotice('Sobre abierto. El comité de quejas está cerrado por vacaciones.');
       audio('win');
     } catch (e) {
       setNotice(e.message);
@@ -161,11 +202,31 @@ export default function App() {
   };
 
   const playMovie = async () => {
-    try {
-      const result = await post('/movies/' + winner.id + '/play');
-      setNotice(result.message);
-    } catch (e) { setNotice(e.message); }
+    if (!winner) return;
+    setMovieError('');
+    setMovieLoading(true);
+    setCurrentMovie(winner);
+    setNotice('La sala SOC abre puertas. Que empiece la desgracia.');
   };
+
+  const handleMovieDecodeError = async () => {
+    setMovieLoading(false);
+    setMovieError('El navegador no puede decodificar este archivo. Intentando abrirlo con VLC…');
+    try {
+      const response = await fetch(API + '/movies/' + encodeURIComponent(currentMovie.id) + '/vlc', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'VLC no está disponible.');
+      setMovieError('El navegador no admite este formato. Se ha enviado la película a VLC.');
+    } catch (error) {
+      setMovieError(`${error.message} Prueba con un archivo MP4 compatible con el navegador.`);
+    }
+  };
+
+  const playMovieFile = movie => { setMovieError(''); setMovieLoading(true); setCurrentMovie(movie); setWinner(movie); window.setTimeout(() => document.getElementById('movie-player')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50); };
+  const bootMessages = ['Calentando el proyector y enfriando las excusas…', 'Buscando una decisión que nadie quiera asumir…', 'Comprobando que el sofá sigue en su sitio…', 'Preparando cine de dudosa reputación…', 'SON OF A COMEDY: aquí el mando no salva a nadie.'];
+  const carouselMovies = available.length ? [...available, ...available, ...available, ...available] : [];
+  const carouselItems = carouselSpin?.movies || carouselMovies;
+  const carouselStyle = { '--carousel-index': carouselSpin?.stopAt ?? 0, '--carousel-duration': '4.8s' };
 
   const filteredVideos = useMemo(() => {
     const query = videoSearch.trim().toLocaleLowerCase('es');
@@ -182,11 +243,11 @@ export default function App() {
         <div className="boot-body">
           <div className="boot-logo">SOC<span>®</span></div>
           <h1>SON OF A COMEDY</h1>
-          <p>PORTO DO SON · SISTEMA DE ENTRETENIMIENTO</p>
+          <p>PORTO DO SON · CUARTEL GENERAL DE LAS MALAS DECISIONES</p>
           <div className="boot-track"><i style={{ width: progress + '%' }} /></div>
-          <div className="boot-percent"><span>PREPARANDO EL DESASTRE</span><b>{Math.floor(progress)}%</b></div>
-          <button disabled={progress < 100} onClick={enter}>ENTRAR EN SOC ▶</button>
-          <small>{progress < 100 ? 'UN MOMENTO, POR FAVOR…' : 'PULSA ENTER PARA CONTINUAR'}</small>
+          <div className="boot-percent"><span>{bootMessages[bootMessage]}</span><b>{Math.floor(progress)}%</b></div>
+          <button disabled={progress < 100} onClick={enter}>ABRIR LAS PUERTAS ▶</button>
+          <small>{progress < 100 ? 'LA VERGÜENZA TARDA UNOS SEGUNDOS…' : 'PULSA ENTER Y CARGA CON LAS CONSECUENCIAS'}</small>
         </div>
       </div>
       <div className="boot-copyright">SOC ENTERTAINMENT SYSTEM © 2026</div>
@@ -205,30 +266,32 @@ export default function App() {
         <button className={tab === 'movies' ? 'selected' : ''} onClick={() => setTab('movies')}><Film /> PELÍCULAS</button>
         <button className={tab === 'videos' ? 'selected' : ''} onClick={() => setTab('videos')}><Youtube /> EL RELLANO</button>
         <span className="nav-spacer" />
-        <button className="sound-toggle" onClick={() => setSoundOn(value => !value)}>{soundOn ? <Volume2 /> : <VolumeX />} SONIDO {soundOn ? 'ON' : 'OFF'}</button>
+        <div className="anthem-control">
+          <audio ref={anthemRef} src="/songs/SOC2.mp3" preload="none" loop onPlay={() => setAnthemPlaying(true)} onPause={() => setAnthemPlaying(false)} />
+          <button className={'anthem-toggle ' + (anthemPlaying ? 'playing' : '')} aria-label={anthemPlaying ? 'Pausar himno SOC' : 'Reproducir himno SOC'} title="Himno SOC2" onClick={toggleAnthem}><Music2 /> <span>{anthemPlaying ? 'SOC2 EN EL AIRE' : 'HIMNO SOC2'}</span></button>
+          <input aria-label="Volumen del himno SOC2" type="range" min="0" max="1" step="0.05" value={anthemVolume} onChange={event => { const value = Number(event.target.value); setAnthemVolume(value); if (anthemRef.current) anthemRef.current.volume = value; }} />
+        </div>
+        <button className="sound-toggle" aria-label={`Efectos de sonido ${soundOn ? 'activados' : 'desactivados'}`} onClick={() => setSoundOn(value => !value)}>{soundOn ? <Volume2 /> : <VolumeX />} EFECTOS {soundOn ? 'ON' : 'OFF'}</button>
       </nav>
 
       {tab === 'movies' ? (
         <>
-          <div className="section-title"><span>01.</span><div><h2>LA RULETA DEL DESTINO</h2><p>52 películas. Dos hermanos. Una decisión que nadie quiere tomar.</p></div></div>
+          <div className="section-title"><span>01.</span><div><h2>LA CINTA DE LA VERGÜENZA</h2><p>El azar pone la película. Vosotros ponéis las excusas. Ya sabemos cómo acaba esto.</p></div></div>
           <section className="movie-layout">
             <article className="roulette-box">
-              <div className="box-caption"><b>SELECTOR ALEATORIO DE PELÍCULAS</b><span>NO MANIPULADO*</span></div>
+              <div className="box-caption"><b>EL SOBRE DORADO · CONTENIDO ALEATORIO</b><span>PUJA CON TU DIGNIDAD</span></div>
               <div className={'roulette-stage ' + (drawing ? 'is-spinning' : '')}>
-                <div className="wheel-pointer">▼</div>
-                <div className="roulette-wheel">
-                  <div className="wheel-rings" />
-                  <div className="wheel-slices" />
-                  <div className="wheel-hub"><strong>SOC</strong><small>2026</small></div>
-                </div>
+                <div className="carousel-pointer">▼</div>
+                <div className="loot-window"><div key={carouselRun} className={'loot-track ' + (drawing && carouselSpin ? 'spinning' : '')} style={carouselStyle}>{carouselItems.map((movie, index) => <div className={'loot-card ' + (carouselSpin?.selectedId === movie.id && carouselSpin.stopAt === index ? 'selected' : '')} key={`${movie.id}-${index}`}><div className="loot-cover">{movie.cover ? <img src={movie.cover} alt="" /> : <div className="cover-placeholder"><Film /><small>PORTADA PENDIENTE</small></div>}</div><b>{movie.title}</b></div>)}</div></div>
+                <div className="carousel-pointer bottom">▲</div>
               </div>
               <div className="roulette-controls">
                 <button className="draw-button" disabled={drawing || !available.length} onClick={draw}>
-                  <Shuffle /> {drawing ? 'GIRANDO…' : '¡ELEGIR PELÍCULA!'}
+                  <Shuffle /> {drawing ? 'EL DESTINO ESTÁ BARAJANDO…' : '¡ABRIR SOBRE!'}
                 </button>
-                <button className="new-session" onClick={reset}><RotateCcw /> NUEVA SESIÓN</button>
+                <button className="new-session" disabled={drawing} onClick={reset}><RotateCcw /> NUEVA SESIÓN</button>
               </div>
-              <p className="roulette-disclaimer">* La organización no se hace responsable de los resultados.</p>
+              <p className="roulette-disclaimer">Una película. Cero derecho a quejarse. Bueno, quejarse podéis; cambiarla, no.</p>
             </article>
 
             <aside className="movie-sidebar">
@@ -240,11 +303,18 @@ export default function App() {
                     <h3>{winner.title}</h3>
                     <p>La suerte ha hablado. Sed buenos perdedores.</p>
                     <div className="winner-actions">
-                      <button className="action-play" onClick={playMovie}><Play /> ABRIR EN VLC</button>
+                      <button className="action-play" onClick={playMovie}><Play /> VER AQUÍ</button>
                       <button className="action-watched" onClick={() => act('watched')}><Check /> VISTA</button>
                       <button onClick={() => act('reject')}><X /> PASAR</button>
                       <button onClick={() => act('missing')}><AlertTriangle /> NO ESTÁ</button>
                     </div>
+                    {currentMovie && currentMovie.id === winner.id && <div id="movie-player" className="movie-player-inline">
+                      <div className="player-title"><b>{currentMovie.title}</b><span>SOC PLAYER · SESIÓN OFICIAL</span></div>
+                      <div className="movie-video-frame">
+                        {movieError ? <div className="movie-play-error"><b>EL PROYECTOR SE HA ATRAGANTADO</b><span>{movieError}</span><small>MKV y AVI suelen necesitar VLC; MP4 suele funcionar en el navegador.</small></div> : <video key={currentMovie.file} src={'/movie-files/' + encodeURIComponent(currentMovie.file)} controls autoPlay playsInline preload="auto" muted={false} onLoadStart={() => { setMovieLoading(true); setMovieError(''); }} onCanPlay={() => setMovieLoading(false)} onError={handleMovieDecodeError} />}
+                      </div>
+                      <div className="player-footer"><span>{currentMovie.file}</span><button onClick={() => { setCurrentMovie(null); setMovieLoading(false); setMovieError(''); }}>CERRAR SALA ×</button></div>
+                    </div>}
                   </div>
                 ) : (
                   <div className="empty-winner"><div className="question-mark">?</div><b>¿QUÉ TOCARÁ?</b><p>La película elegida aparecerá aquí.</p></div>
@@ -262,6 +332,18 @@ export default function App() {
                 <p>{watched} de {movies.length} películas vistas en total.</p>
               </div>
             </aside>
+          </section>
+          <section className="movie-gallery">
+            <div className="movie-gallery-heading"><b>EL ARCHIVO DE LAS MALAS IDEAS</b><span>{movies.length} TÍTULOS · ELIGE TU PROPIA DESGRACIA</span></div>
+            <div className="movie-gallery-grid">{movies.map(movie => {
+              const rejected = session?.rejectedIds?.includes(movie.id) || session?.missingIds?.includes(movie.id);
+              const watchedMovie = movie.status === 'watched';
+              return <button key={movie.id} className={`movie-card ${watchedMovie ? 'watched' : ''} ${rejected ? 'rejected' : ''}`} onClick={() => playMovieFile(movie)}>
+                <span className="movie-card-art">{movie.cover ? <img src={movie.cover} alt="" loading="lazy" /> : <><Film /><small>{movie.file?.split('.').pop()?.toUpperCase()}</small></>}</span>
+                <span className="movie-card-title">{movie.title}</span><span className="movie-card-file">{movie.file}</span>
+                {(watchedMovie || rejected) && <i>{watchedMovie ? 'VISTA' : 'PASADA'}</i>}
+              </button>;
+            })}</div>
           </section>
         </>
       ) : (
@@ -291,7 +373,7 @@ export default function App() {
                   {filteredVideos.map((video, index) => (
                     <button className={'video-card ' + (currentVideo?.url === video.url ? 'playing' : '')} key={video.name} onClick={() => setCurrentVideo(video)}>
                       <span className="video-thumb">
-                        {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <><video src={video.url} muted preload="metadata" onLoadedData={event => event.currentTarget.classList.add('ready')} /><span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span></>}
+                        {video.thumbnail ? <img src={video.thumbnail} alt="" loading="lazy" /> : <><video src={video.url} muted preload="metadata" onLoadedMetadata={event => { const v = event.currentTarget; v.currentTime = Math.min(2, Math.max(0, v.duration - 0.1)); }} onSeeked={event => { const v = event.currentTarget; const c = document.createElement('canvas'); c.width = c.height = 1; const x = c.getContext('2d'); x.drawImage(v, 0, 0, 1, 1); const d = x.getImageData(0, 0, 1, 1).data; if (d[0] < 22 && d[1] < 22 && d[2] < 22 && v.currentTime + 2 < v.duration) { v.currentTime = Math.min(v.currentTime + 2, v.duration - 0.1); return; } v.classList.add('ready'); }} /><span className="thumb-placeholder"><Tv /><b>EL RELLANO</b><small>VÍDEO #{String(index + 1).padStart(3, '0')}</small></span></>}
                         <i><Play /></i>
                       </span>
                       <span className="video-card-title">{video.title}</span>
@@ -300,10 +382,11 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <div className="empty-videos"><FolderOpen /><b>NO HAY VÍDEOS TODAVÍA</b><p>Copia tus vídeos a la carpeta <code>videos</code> del proyecto y pulsa «Actualizar».</p><small>Formatos compatibles: MP4, WebM, OGG, OGV y MOV (según navegador).</small></div>
+                <div className="empty-videos"><FolderOpen /><b>NO HAY VÍDEOS TODAVÍA</b><p>Añade vídeos a la carpeta <code>Videos</code> junto al proyecto y pulsa «Actualizar».</p><small>Formatos compatibles: MP4, WebM, OGG, OGV y MOV (según navegador).</small></div>
               )}
             <div className="rellano-bottom">EL RELLANO SOC · ARCHIVO LOCAL · PROHIBIDO PONER TEMAS DE BUEN GUSTO</div>
           </section>
+
         </>
       )}
 
@@ -312,3 +395,11 @@ export default function App() {
     </main>
   );
 }
+
+
+
+
+
+
+
+

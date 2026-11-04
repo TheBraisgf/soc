@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   getMovies, saveMovies, getHistory, saveHistory, getSession, saveSession,
-  ensureData, mediaDir, videosDir
+  ensureData, mediaDir, videosDir, coversDir, songsDir
 } from './store.js';
 
 const app = express();
@@ -13,6 +13,9 @@ app.use(cors());
 app.use(express.json());
 app.use('/media', express.static(mediaDir));
 app.use('/videos', express.static(videosDir, { fallthrough: false, index: false }));
+app.use('/covers', express.static(coversDir, { fallthrough: false, index: false }));
+app.use('/movie-files', express.static(mediaDir, { fallthrough: false, index: false }));
+app.use('/songs', express.static(songsDir, { fallthrough: false, index: false }));
 
 const port = Number(process.env.PORT || 3001);
 const safe = id => /^[a-zA-Z0-9_-]+$/.test(id);
@@ -106,24 +109,29 @@ app.post('/api/movies/:id/:action', async (q, r, n) => {
 
 app.post('/api/movies/:id/play', async (q, r, n) => {
   try {
-    const { id } = q.params;
-    if (!safe(id)) return r.status(400).json({ error: 'ID no válido.' });
-    const movie = (await getMovies()).find(m => m.id === id);
+    const requestedFile = decodeURIComponent(q.params.id);
+    if (path.basename(requestedFile) !== requestedFile) return r.status(400).json({ error: 'Ruta de película no válida.' });
+    const movie = (await getMovies()).find(m => m.file === requestedFile || m.id === requestedFile);
     if (!movie) return r.status(404).json({ error: 'Película no encontrada.' });
     if (!movie.file) return r.status(400).json({ error: 'Asocia primero el archivo en data/movies.json.' });
     const file = path.resolve(mediaDir, movie.file);
-    if (!file.startsWith(mediaDir + path.sep)) return r.status(400).json({ error: 'Ruta no válida.' });
+    if (path.dirname(file) !== mediaDir) return r.status(400).json({ error: 'Ruta no válida.' });
     try { await fs.access(file); } catch { return r.status(404).json({ error: 'No encuentro el vídeo: ' + movie.file }); }
+    r.json({ ok: true, title: movie.title, url: '/movie-files/' + encodeURIComponent(movie.file), message: 'Reproducción lista en SOC Player.' });
+  } catch (e) { n(e); }
+});
+
+app.post('/api/movies/:id/vlc', async (q, r, n) => {
+  try {
+    const movie = (await getMovies()).find(m => m.id === q.params.id);
+    if (!movie?.file) return r.status(404).json({ error: 'No encuentro el archivo de esta película.' });
+    const file = path.resolve(mediaDir, movie.file);
+    if (path.dirname(file) !== mediaDir) return r.status(400).json({ error: 'Ruta no válida.' });
+    await fs.access(file);
     const vlc = process.env.VLC_PATH || (process.platform === 'win32' ? 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe' : 'vlc');
     const child = spawn(vlc, [file], { detached: true, stdio: 'ignore', windowsHide: true });
-    let replied = false;
-    child.once('error', e => {
-      console.error(e);
-      if (!replied) { replied = true; r.status(500).json({ error: 'No se pudo iniciar VLC. Comprueba que VLC está instalado.' }); }
-    });
-    child.once('spawn', () => {
-      if (!replied) { replied = true; r.json({ ok: true, message: 'Enviada a VLC.' }); }
-    });
+    child.once('error', error => { console.error(error); if (!r.headersSent) r.status(500).json({ error: 'No se pudo iniciar VLC. Configura VLC_PATH en .env o usa el reproductor web.' }); });
+    child.once('spawn', () => { if (!r.headersSent) r.json({ ok: true, message: 'Enviada a VLC.' }); });
     child.unref();
   } catch (e) { n(e); }
 });
@@ -143,3 +151,9 @@ app.use((e, _q, r, _n) => {
 });
 await ensureData();
 app.listen(port, () => console.log('SOC Player API en http://localhost:' + port));
+
+
+
+
+
+
