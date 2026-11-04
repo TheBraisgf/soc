@@ -1,1 +1,38 @@
-import fs from'node:fs/promises';import path from'node:path';import{fileURLToPath}from'node:url';const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),dataDir=path.join(root,'data');export const mediaDir=path.join(root,'media','movies');async function read(n,f){try{return JSON.parse(await fs.readFile(path.join(dataDir,n),'utf8'));}catch(e){if(e.code==='ENOENT')return f;throw e;}}async function write(n,v){await fs.mkdir(dataDir,{recursive:true});const p=path.join(dataDir,n);await fs.writeFile(p+'.tmp',JSON.stringify(v,null,2));await fs.rename(p+'.tmp',p);}export const getMovies=()=>read('movies.json',[]),saveMovies=v=>write('movies.json',v),getHistory=()=>read('history.json',[]),saveHistory=v=>write('history.json',v),getSession=()=>read('session.json',{id:1,selectedId:null,rejectedIds:[],missingIds:[],startedAt:null}),saveSession=v=>write('session.json',v);export async function ensureData(){await fs.mkdir(mediaDir,{recursive:true});for(const[n,v]of[['movies.json',[]],['history.json',[]],['session.json',{id:1,selectedId:null,rejectedIds:[],missingIds:[],startedAt:null}]]){try{await fs.access(path.join(dataDir,n));}catch{await write(n,v);}}}
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dataDir = path.join(root, 'data');
+export const mediaDir = path.join(root, 'media', 'movies');
+export const videosDir = path.join(root, 'videos');
+
+async function read(name, fallback) {
+  try { return JSON.parse(await fs.readFile(path.join(dataDir, name), 'utf8')); }
+  catch (e) { if (e.code === 'ENOENT') return fallback; throw e; }
+}
+async function write(name, value) {
+  await fs.mkdir(dataDir, { recursive: true });
+  const file = path.join(dataDir, name);
+  await fs.writeFile(file + '.tmp', JSON.stringify(value, null, 2));
+  await fs.rename(file + '.tmp', file);
+}
+export const getMovies = () => read('movies.json', []);
+export const saveMovies = value => write('movies.json', value);
+export const getHistory = () => read('history.json', []);
+export const saveHistory = value => write('history.json', value);
+export const getSession = () => read('session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], startedAt: null });
+export const saveSession = value => write('session.json', value);
+
+export async function ensureData() {
+  await fs.mkdir(mediaDir, { recursive: true });
+  await fs.mkdir(videosDir, { recursive: true });
+  for (const [name, value] of [
+    ['movies.json', []],
+    ['history.json', []],
+    ['session.json', { id: 1, selectedId: null, rejectedIds: [], missingIds: [], startedAt: null }]
+  ]) {
+    try { await fs.access(path.join(dataDir, name)); }
+    catch { await write(name, value); }
+  }
+}
